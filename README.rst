@@ -7,7 +7,7 @@ Pelican is a static site generator, written in Python_.
 * Includes a simple command line tool to (re)generate site files
 * Easy to interface with version control systems and web hooks
 * Completely static output is simple to host anywhere
-
+  
 
 Features
 --------
@@ -22,7 +22,8 @@ Pelican currently supports:
 * Syntax highlighting via Pygments_
 * Importing existing content from WordPress, Dotclear, and other services
 * Fast rebuild times due to content caching and selective output writing
-
+* *This fork supports extraction of unescaped, raw items from a WordPress export*
+  
 Check out `Pelican's documentation`_ for further information.
 
 
