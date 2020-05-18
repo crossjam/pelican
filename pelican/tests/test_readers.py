@@ -1,21 +1,10 @@
-# -*- coding: utf-8 -*-
-from __future__ import print_function, unicode_literals
-
 import os
-
-import six
+from unittest.mock import patch
 
 from pelican import readers
 from pelican.tests.support import get_settings, unittest
 from pelican.utils import SafeDatetime
 
-try:
-    from unittest.mock import patch
-except ImportError:
-    try:
-        from mock import patch
-    except ImportError:
-        patch = False
 
 CUR_DIR = os.path.dirname(__file__)
 CONTENT_PATH = os.path.join(CUR_DIR, 'content')
@@ -64,8 +53,7 @@ class TestAssertDictHasSubset(ReaderTest):
         self.assertDictHasSubset(self.dictionary, self.dictionary)
 
     def test_fail_not_set(self):
-        six.assertRaisesRegex(
-            self,
+        self.assertRaisesRegex(
             AssertionError,
             r'Expected.*key-c.*to have value.*val-c.*but was not in Dict',
             self.assertDictHasSubset,
@@ -73,8 +61,7 @@ class TestAssertDictHasSubset(ReaderTest):
             {'key-c': 'val-c'})
 
     def test_fail_wrong_val(self):
-        six.assertRaisesRegex(
-            self,
+        self.assertRaisesRegex(
             AssertionError,
             r'Expected .*key-a.* to have value .*val-b.* but was .*val-a.*',
             self.assertDictHasSubset,
@@ -88,7 +75,50 @@ class DefaultReaderTest(ReaderTest):
         with self.assertRaises(TypeError):
             self.read_file(path='article_with_metadata.unknownextension')
 
-    @unittest.skipUnless(patch, 'Needs Mock module')
+    def test_readfile_path_metadata_implicit_dates(self):
+        test_file = 'article_with_metadata_implicit_dates.html'
+        page = self.read_file(path=test_file, DEFAULT_DATE='fs')
+        expected = {
+            'date': SafeDatetime.fromtimestamp(
+                os.stat(_path(test_file)).st_mtime),
+            'modified': SafeDatetime.fromtimestamp(
+                os.stat(_path(test_file)).st_mtime)
+        }
+
+        self.assertDictHasSubset(page.metadata, expected)
+
+    def test_readfile_path_metadata_explicit_dates(self):
+        test_file = 'article_with_metadata_explicit_dates.html'
+        page = self.read_file(path=test_file, DEFAULT_DATE='fs')
+        expected = {
+            'date': SafeDatetime(2010, 12, 2, 10, 14),
+            'modified': SafeDatetime(2010, 12, 31, 23, 59)
+        }
+
+        self.assertDictHasSubset(page.metadata, expected)
+
+    def test_readfile_path_metadata_implicit_date_explicit_modified(self):
+        test_file = 'article_with_metadata_implicit_date_explicit_modified.html'
+        page = self.read_file(path=test_file, DEFAULT_DATE='fs')
+        expected = {
+            'date': SafeDatetime.fromtimestamp(
+                os.stat(_path(test_file)).st_mtime),
+            'modified': SafeDatetime(2010, 12, 2, 10, 14),
+        }
+
+        self.assertDictHasSubset(page.metadata, expected)
+
+    def test_readfile_path_metadata_explicit_date_implicit_modified(self):
+        test_file = 'article_with_metadata_explicit_date_implicit_modified.html'
+        page = self.read_file(path=test_file, DEFAULT_DATE='fs')
+        expected = {
+            'date': SafeDatetime(2010, 12, 2, 10, 14),
+            'modified': SafeDatetime.fromtimestamp(
+                os.stat(_path(test_file)).st_mtime)
+        }
+
+        self.assertDictHasSubset(page.metadata, expected)
+
     def test_find_empty_alt(self):
         with patch('pelican.readers.logger') as log_mock:
             content = ['<img alt="" src="test-image.png" width="300px" />',
@@ -97,9 +127,9 @@ class DefaultReaderTest(ReaderTest):
             for tag in content:
                 readers.find_empty_alt(tag, '/test/path')
                 log_mock.warning.assert_called_with(
-                    u'Empty alt attribute for image %s in %s',
-                    u'test-image.png',
-                    u'/test/path',
+                    'Empty alt attribute for image %s in %s',
+                    'test-image.png',
+                    '/test/path',
                     extra={'limit_msg':
                            'Other images have empty alt attributes'}
                 )
@@ -445,8 +475,42 @@ class RstReaderTest(ReaderTest):
     def test_parse_error(self):
         # Verify that it raises an Exception, not nothing and not SystemExit or
         # some such
-        with six.assertRaisesRegex(self, Exception, "underline too short"):
+        with self.assertRaisesRegex(Exception, "underline too short"):
             self.read_file(path='../parse_error/parse_error.rst')
+
+    def test_typogrify_dashes_config(self):
+        # Test default config
+        page = self.read_file(
+            path='article_with_typogrify_dashes.rst',
+            TYPOGRIFY=True,
+            TYPOGRIFY_DASHES='default')
+        expected = "<p>One: -; Two: &#8212;; Three:&nbsp;&#8212;-</p>\n"
+        expected_title = "One -, two &#8212;, three &#8212;-&nbsp;dashes!"
+
+        self.assertEqual(page.content, expected)
+        self.assertEqual(page.title, expected_title)
+
+        # Test 'oldschool' variant
+        page = self.read_file(
+            path='article_with_typogrify_dashes.rst',
+            TYPOGRIFY=True,
+            TYPOGRIFY_DASHES='oldschool')
+        expected = "<p>One: -; Two: &#8211;; Three:&nbsp;&#8212;</p>\n"
+        expected_title = "One -, two &#8211;, three &#8212;&nbsp;dashes!"
+
+        self.assertEqual(page.content, expected)
+        self.assertEqual(page.title, expected_title)
+
+        # Test 'oldschool_inverted' variant
+        page = self.read_file(
+            path='article_with_typogrify_dashes.rst',
+            TYPOGRIFY=True,
+            TYPOGRIFY_DASHES='oldschool_inverted')
+        expected = "<p>One: -; Two: &#8212;; Three:&nbsp;&#8211;</p>\n"
+        expected_title = "One -, two &#8212;, three &#8211;&nbsp;dashes!"
+
+        self.assertEqual(page.content, expected)
+        self.assertEqual(page.title, expected_title)
 
 
 @unittest.skipUnless(readers.Markdown, "markdown isn't installed")
@@ -480,7 +544,10 @@ class MdReaderTest(ReaderTest):
         self.assertDictHasSubset(metadata, expected)
 
     def test_article_with_footnote(self):
-        reader = readers.MarkdownReader(settings=get_settings())
+        settings = get_settings()
+        ec = settings['MARKDOWN']['extension_configs']
+        ec['markdown.extensions.footnotes'] = {'SEPARATOR': '-'}
+        reader = readers.MarkdownReader(settings)
         content, metadata = reader.read(
             _path('article_with_markdown_and_footnote.md'))
         expected_content = (
@@ -647,6 +714,19 @@ class MdReaderTest(ReaderTest):
         }
         self.assertDictHasSubset(metadata, expected)
 
+    def test_metadata_not_parsed_for_metadata(self):
+        settings = get_settings()
+        settings['FORMATTED_FIELDS'] = ['summary']
+
+        reader = readers.MarkdownReader(settings=settings)
+        content, metadata = reader.read(
+            _path('article_with_markdown_and_nested_metadata.md'))
+        expected = {
+            'title': 'Article with markdown and nested summary metadata',
+            'summary': '<p>Test: This metadata value looks like metadata</p>',
+        }
+        self.assertDictHasSubset(metadata, expected)
+
     def test_empty_file(self):
         reader = readers.MarkdownReader(settings=get_settings())
         content, metadata = reader.read(
@@ -662,6 +742,40 @@ class MdReaderTest(ReaderTest):
 
         self.assertEqual(metadata, {})
         self.assertEqual(content, '')
+
+    def test_typogrify_dashes_config(self):
+        # Test default config
+        page = self.read_file(
+            path='article_with_typogrify_dashes.md',
+            TYPOGRIFY=True,
+            TYPOGRIFY_DASHES='default')
+        expected = "<p>One: -; Two: &#8212;; Three:&nbsp;&#8212;-</p>"
+        expected_title = "One -, two &#8212;, three &#8212;-&nbsp;dashes!"
+
+        self.assertEqual(page.content, expected)
+        self.assertEqual(page.title, expected_title)
+
+        # Test 'oldschool' variant
+        page = self.read_file(
+            path='article_with_typogrify_dashes.md',
+            TYPOGRIFY=True,
+            TYPOGRIFY_DASHES='oldschool')
+        expected = "<p>One: -; Two: &#8211;; Three:&nbsp;&#8212;</p>"
+        expected_title = "One -, two &#8211;, three &#8212;&nbsp;dashes!"
+
+        self.assertEqual(page.content, expected)
+        self.assertEqual(page.title, expected_title)
+
+        # Test 'oldschool_inverted' variant
+        page = self.read_file(
+            path='article_with_typogrify_dashes.md',
+            TYPOGRIFY=True,
+            TYPOGRIFY_DASHES='oldschool_inverted')
+        expected = "<p>One: -; Two: &#8212;; Three:&nbsp;&#8211;</p>"
+        expected_title = "One -, two &#8212;, three &#8211;&nbsp;dashes!"
+
+        self.assertEqual(page.content, expected)
+        self.assertEqual(page.title, expected_title)
 
 
 class HTMLReaderTest(ReaderTest):
@@ -760,4 +874,11 @@ class HTMLReaderTest(ReaderTest):
             'title': 'Article with Nonconformant HTML meta tags',
         }
 
+        self.assertDictHasSubset(page.metadata, expected)
+
+    def test_article_with_inline_svg(self):
+        page = self.read_file(path='article_with_inline_svg.html')
+        expected = {
+            'title': 'Article with an inline SVG',
+        }
         self.assertDictHasSubset(page.metadata, expected)

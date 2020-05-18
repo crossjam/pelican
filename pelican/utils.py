@@ -1,9 +1,4 @@
-# -*- coding: utf-8 -*-
-from __future__ import print_function, unicode_literals
-
-import codecs
 import datetime
-import errno
 import fnmatch
 import locale
 import logging
@@ -12,12 +7,12 @@ import re
 import shutil
 import sys
 import traceback
-try:
-    from collections.abc import Hashable
-except ImportError:
-    from collections import Hashable
+import urllib
+from collections.abc import Hashable
 from contextlib import contextmanager
 from functools import partial
+from html import entities
+from html.parser import HTMLParser
 from itertools import groupby
 from operator import attrgetter
 
@@ -27,21 +22,15 @@ from jinja2 import Markup
 
 import pytz
 
-import six
-from six.moves import html_entities
-from six.moves.html_parser import HTMLParser
-
-try:
-    from html import escape
-except ImportError:
-    from cgi import escape
 
 logger = logging.getLogger(__name__)
 
 
 def sanitised_join(base_directory, *parts):
-    joined = os.path.abspath(os.path.join(base_directory, *parts))
-    if not joined.startswith(os.path.abspath(base_directory)):
+    joined = posixize_path(
+        os.path.abspath(os.path.join(base_directory, *parts)))
+    base = posixize_path(os.path.abspath(base_directory))
+    if not joined.startswith(base):
         raise RuntimeError(
             "Attempted to break out of output directory to {}".format(
                 joined
@@ -53,17 +42,11 @@ def sanitised_join(base_directory, *parts):
 
 def strftime(date, date_format):
     '''
-    Replacement for built-in strftime
-
-    This is necessary because of the way Py2 handles date format strings.
-    Specifically, Py2 strftime takes a bytestring. In the case of text output
-    (e.g. %b, %a, etc), the output is encoded with an encoding defined by
-    locale.LC_TIME. Things get messy if the formatting string has chars that
-    are not valid in LC_TIME defined encoding.
+    Enhanced replacement for built-in strftime with zero stripping
 
     This works by 'grabbing' possible format strings (those starting with %),
-    formatting them with the date, (if necessary) decoding the output and
-    replacing formatted output back.
+    formatting them with the date, stripping any leading zeros if - prefix is
+    used and replacing formatted output back.
     '''
     def strip_zeros(x):
         return x.lstrip('0') or '0'
@@ -75,10 +58,6 @@ def strftime(date, date_format):
 
     # replace candidates with placeholders for later % formatting
     template = re.sub(format_options, '%s', date_format)
-
-    # we need to convert formatted dates back to unicode in Py2
-    # LC_TIME determines the encoding for built-in strftime outputs
-    lang_code, enc = locale.getlocale(locale.LC_TIME)
 
     formatted_candidates = []
     for candidate in candidates:
@@ -97,10 +76,6 @@ def strftime(date, date_format):
                 formatted = date.strftime(candidate, safe=False)
             else:
                 formatted = date.strftime(candidate)
-
-            # convert Py2 result to unicode
-            if not six.PY3 and enc is not None:
-                formatted = formatted.decode(enc)
 
             # strip zeros if '-' prefix is used
             if conversion:
@@ -121,10 +96,10 @@ class SafeDatetime(datetime.datetime):
         if safe:
             return strftime(self, fmt)
         else:
-            return super(SafeDatetime, self).strftime(fmt)
+            return super().strftime(fmt)
 
 
-class DateFormatter(object):
+class DateFormatter:
     '''A date formatter object used as a jinja filter
 
     Uses the `strftime` implementation and makes sure jinja uses the locale
@@ -150,23 +125,7 @@ class DateFormatter(object):
         return formatted
 
 
-def python_2_unicode_compatible(klass):
-    """
-    A decorator that defines __unicode__ and __str__ methods under Python 2.
-    Under Python 3 it does nothing.
-
-    To support Python 2 and 3 with a single code base, define a __str__ method
-    returning text and apply this decorator to the class.
-
-    From django.utils.encoding.
-    """
-    if not six.PY3:
-        klass.__unicode__ = klass.__str__
-        klass.__str__ = lambda self: self.__unicode__().encode('utf-8')
-    return klass
-
-
-class memoized(object):
+class memoized:
     """Function decorator to cache return values.
 
     If called later with the same arguments, the cached value is returned
@@ -214,15 +173,15 @@ def deprecated_attribute(old, new, since=None, remove=None, doc=None):
     content of the dummy method is ignored.
     """
     def _warn():
-        version = '.'.join(six.text_type(x) for x in since)
+        version = '.'.join(str(x) for x in since)
         message = ['{} has been deprecated since {}'.format(old, version)]
         if remove:
-            version = '.'.join(six.text_type(x) for x in remove)
+            version = '.'.join(str(x) for x in remove)
             message.append(
                 ' and will be removed by version {}'.format(version))
         message.append('.  Use {} instead.'.format(new))
         logger.warning(''.join(message))
-        logger.debug(''.join(six.text_type(x) for x
+        logger.debug(''.join(str(x) for x
                              in traceback.format_stack()))
 
     def fget(self):
@@ -250,23 +209,20 @@ def get_date(string):
     try:
         return dateutil.parser.parse(string, default=default)
     except (TypeError, ValueError):
-        raise ValueError('{0!r} is not a valid date'.format(string))
+        raise ValueError('{!r} is not a valid date'.format(string))
 
 
 @contextmanager
-def pelican_open(filename, mode='rb', strip_crs=(sys.platform == 'win32')):
+def pelican_open(filename, mode='r', strip_crs=(sys.platform == 'win32')):
     """Open a file and return its content"""
 
-    with codecs.open(filename, mode, encoding='utf-8') as infile:
+    # utf-8-sig will clear any BOM if present
+    with open(filename, mode, encoding='utf-8-sig') as infile:
         content = infile.read()
-    if content[:1] == codecs.BOM_UTF8.decode('utf8'):
-        content = content[1:]
-    if strip_crs:
-        content = content.replace('\r\n', '\n')
     yield content
 
 
-def slugify(value, regex_subs=()):
+def slugify(value, regex_subs=(), preserve_case=False, use_unicode=False):
     """
     Normalizes string, converts to lowercase, removes non-alpha characters,
     and converts spaces to hyphens.
@@ -274,29 +230,36 @@ def slugify(value, regex_subs=()):
     Took from Django sources.
     """
 
-    # TODO Maybe steal again from current Django 1.5dev
-    value = Markup(value).striptags()
-    # value must be unicode per se
     import unicodedata
-    from unidecode import unidecode
-    # unidecode returns str in Py2 and 3, so in Py2 we have to make
-    # it unicode again
-    value = unidecode(value)
-    if isinstance(value, six.binary_type):
-        value = value.decode('ascii')
-    # still unicode
-    value = unicodedata.normalize('NFKD', value)
+    import unidecode
 
+    def normalize_unicode(text):
+        # normalize text by compatibility composition
+        # see: https://en.wikipedia.org/wiki/Unicode_equivalence
+        return unicodedata.normalize('NFKC', text)
+
+    # strip tags from value
+    value = Markup(value).striptags()
+
+    # normalization
+    value = normalize_unicode(value)
+
+    if not use_unicode:
+        # ASCII-fy
+        value = unidecode.unidecode(value)
+
+    # perform regex substitutions
     for src, dst in regex_subs:
-        value = re.sub(src, dst, value, flags=re.IGNORECASE)
+        value = re.sub(
+            normalize_unicode(src),
+            normalize_unicode(dst),
+            value,
+            flags=re.IGNORECASE)
 
-    # convert to lowercase
-    value = value.lower()
+    if not preserve_case:
+        value = value.lower()
 
-    # we want only ASCII chars
-    value = value.encode('ascii', 'ignore').strip()
-    # but Pelican should generally use only unicode
-    return value.decode('ascii')
+    return value.strip()
 
 
 def copy(source, destination, ignores=None):
@@ -430,10 +393,9 @@ def get_relative_path(path):
 
 def path_to_url(path):
     """Return the URL corresponding to a given path."""
-    if os.sep == '/':
-        return path
-    else:
-        return '/'.join(split_all(path))
+    if path is not None:
+        path = posixize_path(path)
+    return path
 
 
 def posixize_path(rel_path):
@@ -453,18 +415,11 @@ class _HTMLWordTruncator(HTMLParser):
     class TruncationCompleted(Exception):
 
         def __init__(self, truncate_at):
-            super(_HTMLWordTruncator.TruncationCompleted, self).__init__(
-                truncate_at)
+            super().__init__(truncate_at)
             self.truncate_at = truncate_at
 
     def __init__(self, max_words):
-        # In Python 2, HTMLParser is not a new-style class,
-        # hence super() cannot be used.
-        try:
-            HTMLParser.__init__(self, convert_charrefs=False)
-        except TypeError:
-            # pre Python 3.3
-            HTMLParser.__init__(self)
+        super().__init__(convert_charrefs=False)
 
         self.max_words = max_words
         self.words_found = 0
@@ -474,9 +429,7 @@ class _HTMLWordTruncator(HTMLParser):
 
     def feed(self, *args, **kwargs):
         try:
-            # With Python 2, super() cannot be used.
-            # See the comment for __init__().
-            HTMLParser.feed(self, *args, **kwargs)
+            super().feed(*args, **kwargs)
         except self.TruncationCompleted as exc:
             self.truncate_at = exc.truncate_at
         else:
@@ -584,8 +537,8 @@ class _HTMLWordTruncator(HTMLParser):
         `name` is the entity ref without ampersand and semicolon (e.g. `mdash`)
         """
         try:
-            codepoint = html_entities.name2codepoint[name]
-            char = six.unichr(codepoint)
+            codepoint = entities.name2codepoint[name]
+            char = chr(codepoint)
         except KeyError:
             char = ''
         self._handle_ref(name, char)
@@ -602,7 +555,7 @@ class _HTMLWordTruncator(HTMLParser):
                 codepoint = int(name[1:], 16)
             else:
                 codepoint = int(name)
-            char = six.unichr(codepoint)
+            char = chr(codepoint)
         except (ValueError, OverflowError):
             char = ''
         self._handle_ref('#' + name, char)
@@ -634,14 +587,6 @@ def truncate_html_words(s, num, end_text='…'):
     return out
 
 
-def escape_html(text, quote=True):
-    """Escape '&', '<' and '>' to HTML-safe sequences.
-
-    In Python 2 this uses cgi.escape and in Python 3 this uses html.escape. We
-    wrap here to ensure the quote argument has an identical default."""
-    return escape(text, quote=quote)
-
-
 def process_translations(content_list, translation_id=None):
     """ Finds translations and returns them.
 
@@ -663,7 +608,7 @@ def process_translations(content_list, translation_id=None):
     if not translation_id:
         return content_list, []
 
-    if isinstance(translation_id, six.string_types):
+    if isinstance(translation_id, str):
         translation_id = {translation_id}
 
     index = []
@@ -672,11 +617,11 @@ def process_translations(content_list, translation_id=None):
         content_list.sort(key=attrgetter(*translation_id))
     except TypeError:
         raise TypeError('Cannot unpack {}, \'translation_id\' must be falsy, a'
-                        'string or a collection of strings'
+                        ' string or a collection of strings'
                         .format(translation_id))
     except AttributeError:
-        raise AttributeError('Cannot use {} as \'translation_id\', there'
-                             'appear to be items without these metadata'
+        raise AttributeError('Cannot use {} as \'translation_id\', there '
+                             'appear to be items without these metadata '
                              'attributes'.format(translation_id))
 
     for id_vals, items in groupby(content_list, attrgetter(*translation_id)):
@@ -700,7 +645,7 @@ def get_original_items(items, with_str):
     def _warn_source_paths(msg, items, *extra):
         args = [len(items)]
         args.extend(extra)
-        args.extend((x.source_path for x in items))
+        args.extend(x.source_path for x in items)
         logger.warning('{}: {}'.format(msg, '\n%s' * len(items)), *args)
 
     # warn if several items have the same lang
@@ -753,7 +698,7 @@ def order_content(content_list, order_by='slug'):
                 content_list.sort(key=order_by)
             except Exception:
                 logger.error('Error sorting with function %s', order_by)
-        elif isinstance(order_by, six.string_types):
+        elif isinstance(order_by, str):
             if order_by.startswith('reversed-'):
                 order_reversed = True
                 order_by = order_by.replace('reversed-', '', 1)
@@ -769,71 +714,188 @@ def order_content(content_list, order_by='slug'):
                     content_list.sort(key=attrgetter(order_by),
                                       reverse=order_reversed)
                 except AttributeError:
-                    logger.warning(
-                        'There is no "%s" attribute in the item '
-                        'metadata. Defaulting to slug order.', order_by)
+                    for content in content_list:
+                        try:
+                            getattr(content, order_by)
+                        except AttributeError:
+                            logger.warning(
+                                'There is no "%s" attribute in "%s". '
+                                'Defaulting to slug order.',
+                                order_by,
+                                content.get_relative_source_path(),
+                                extra={
+                                    'limit_msg': ('More files are missing '
+                                                  'the needed attribute.')
+                                })
         else:
             logger.warning(
-                'Invalid *_ORDER_BY setting (%s).'
+                'Invalid *_ORDER_BY setting (%s). '
                 'Valid options are strings and functions.', order_by)
 
     return content_list
 
 
-def folder_watcher(path, extensions, ignores=[]):
-    '''Generator for monitoring a folder for modifications.
+class FileSystemWatcher:
+    def __init__(self, settings_file, reader_class, settings=None):
+        self.watchers = {
+            'settings': FileSystemWatcher.file_watcher(settings_file)
+        }
 
-    Returns a boolean indicating if files are changed since last check.
-    Returns None if there are no matching files in the folder'''
+        self.settings = None
+        self.reader_class = reader_class
+        self._extensions = None
+        self._content_path = None
+        self._theme_path = None
+        self._ignore_files = None
 
-    def file_times(path):
-        '''Return `mtime` for each file in path'''
+        if settings is not None:
+            self.update_watchers(settings)
 
-        for root, dirs, files in os.walk(path, followlinks=True):
-            dirs[:] = [x for x in dirs if not x.startswith(os.curdir)]
+    def update_watchers(self, settings):
+        new_extensions = set(self.reader_class(settings).extensions)
+        new_content_path = settings.get('PATH', '')
+        new_theme_path = settings.get('THEME', '')
+        new_ignore_files = set(settings.get('IGNORE_FILES', []))
 
-            for f in files:
-                valid_extension = f.endswith(tuple(extensions))
-                file_ignored = any(
-                    fnmatch.fnmatch(f, ignore) for ignore in ignores
-                )
-                if valid_extension and not file_ignored:
-                    try:
-                        yield os.stat(os.path.join(root, f)).st_mtime
-                    except OSError as e:
-                        logger.warning('Caught Exception: %s', e)
+        extensions_changed = new_extensions != self._extensions
+        content_changed = new_content_path != self._content_path
+        theme_changed = new_theme_path != self._theme_path
+        ignore_changed = new_ignore_files != self._ignore_files
 
-    LAST_MTIME = 0
-    while True:
-        try:
-            mtime = max(file_times(path))
-            if mtime > LAST_MTIME:
-                LAST_MTIME = mtime
-                yield True
-        except ValueError:
-            yield None
+        # Refresh content watcher if related settings changed
+        if extensions_changed or content_changed or ignore_changed:
+            self.add_watcher('content',
+                             new_content_path,
+                             new_extensions,
+                             new_ignore_files)
+
+        # Refresh theme watcher if related settings changed
+        if theme_changed or ignore_changed:
+            self.add_watcher('theme',
+                             new_theme_path,
+                             [''],
+                             new_ignore_files)
+
+        # Watch STATIC_PATHS
+        old_static_watchers = set(key
+                                  for key in self.watchers
+                                  if key.startswith('[static]'))
+
+        for path in settings.get('STATIC_PATHS', []):
+            key = '[static]{}'.format(path)
+            if ignore_changed or (key not in self.watchers):
+                self.add_watcher(
+                    key,
+                    os.path.join(new_content_path, path),
+                    [''],
+                    new_ignore_files)
+            if key in old_static_watchers:
+                old_static_watchers.remove(key)
+
+        # cleanup removed static watchers
+        for key in old_static_watchers:
+            del self.watchers[key]
+
+        # update values
+        self.settings = settings
+        self._extensions = new_extensions
+        self._content_path = new_content_path
+        self._theme_path = new_theme_path
+        self._ignore_files = new_ignore_files
+
+    def check(self):
+        '''return a key:watcher_status dict for all watchers'''
+        result = {key: next(watcher) for key, watcher in self.watchers.items()}
+
+        # Various warnings
+        if result.get('content') is None:
+            reader_descs = sorted(
+                {
+                    '%s (%s)' % (type(r).__name__, ', '.join(r.file_extensions))
+                    for r in self.reader_class(self.settings).readers.values()
+                    if r.enabled
+                }
+            )
+            logger.warning(
+                    'No valid files found in content for the active readers:\n'
+                    + '\n'.join(reader_descs))
+
+        if result.get('theme') is None:
+            logger.warning('Empty theme folder. Using `basic` theme.')
+
+        return result
+
+    def add_watcher(self, key, path, extensions=[''], ignores=[]):
+        watcher = self.get_watcher(path, extensions, ignores)
+        if watcher is not None:
+            self.watchers[key] = watcher
+
+    def get_watcher(self, path, extensions=[''], ignores=[]):
+        '''return a watcher depending on path type (file or folder)'''
+        if not os.path.exists(path):
+            logger.warning("Watched path does not exist: %s", path)
+            return None
+
+        if os.path.isdir(path):
+            return self.folder_watcher(path, extensions, ignores)
         else:
-            yield False
+            return self.file_watcher(path)
 
+    @staticmethod
+    def folder_watcher(path, extensions, ignores=[]):
+        '''Generator for monitoring a folder for modifications.
 
-def file_watcher(path):
-    '''Generator for monitoring a file for modifications'''
-    LAST_MTIME = 0
-    while True:
-        if path:
+        Returns a boolean indicating if files are changed since last check.
+        Returns None if there are no matching files in the folder'''
+
+        def file_times(path):
+            '''Return `mtime` for each file in path'''
+
+            for root, dirs, files in os.walk(path, followlinks=True):
+                dirs[:] = [x for x in dirs if not x.startswith(os.curdir)]
+
+                for f in files:
+                    valid_extension = f.endswith(tuple(extensions))
+                    file_ignored = any(
+                        fnmatch.fnmatch(f, ignore) for ignore in ignores
+                    )
+                    if valid_extension and not file_ignored:
+                        try:
+                            yield os.stat(os.path.join(root, f)).st_mtime
+                        except OSError as e:
+                            logger.warning('Caught Exception: %s', e)
+
+        LAST_MTIME = 0
+        while True:
             try:
-                mtime = os.stat(path).st_mtime
-            except OSError as e:
-                logger.warning('Caught Exception: %s', e)
-                continue
-
-            if mtime > LAST_MTIME:
-                LAST_MTIME = mtime
-                yield True
+                mtime = max(file_times(path))
+                if mtime > LAST_MTIME:
+                    LAST_MTIME = mtime
+                    yield True
+            except ValueError:
+                yield None
             else:
                 yield False
-        else:
-            yield None
+
+    @staticmethod
+    def file_watcher(path):
+        '''Generator for monitoring a file for modifications'''
+        LAST_MTIME = 0
+        while True:
+            if path:
+                try:
+                    mtime = os.stat(path).st_mtime
+                except OSError as e:
+                    logger.warning('Caught Exception: %s', e)
+                    continue
+
+                if mtime > LAST_MTIME:
+                    LAST_MTIME = mtime
+                    yield True
+                else:
+                    yield False
+            else:
+                yield None
 
 
 def set_date_tzinfo(d, tz_name=None):
@@ -847,11 +909,7 @@ def set_date_tzinfo(d, tz_name=None):
 
 
 def mkdir_p(path):
-    try:
-        os.makedirs(path)
-    except OSError as e:
-        if e.errno != errno.EEXIST or not os.path.isdir(path):
-            raise
+    os.makedirs(path, exist_ok=True)
 
 
 def split_all(path):
@@ -891,8 +949,7 @@ def is_selected_for_writing(settings, path):
 
 def path_to_file_url(path):
     '''Convert file-system path to file:// URL'''
-    return six.moves.urllib_parse.urljoin(
-        "file://", six.moves.urllib.request.pathname2url(path))
+    return urllib.parse.urljoin("file://", urllib.request.pathname2url(path))
 
 
 def maybe_pluralize(count, singular, plural):

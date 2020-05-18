@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-from __future__ import print_function, unicode_literals
 AUTHOR = 'Alexis Métaireau'
 SITENAME = "Alexis' log"
 SITEURL = 'http://blog.notmyidea.org'

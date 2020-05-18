@@ -1,18 +1,8 @@
-# -*- coding: utf-8 -*-
-from __future__ import print_function, unicode_literals
+from unittest.mock import Mock
 
 from pelican.tests.support import unittest
 
-try:
-    from unittest.mock import Mock
-except ImportError:
-    try:
-        from mock import Mock
-    except ImportError:
-        Mock = False
 
-
-@unittest.skipUnless(Mock, 'Needs Mock module')
 class Test_abbr_role(unittest.TestCase):
     def call_it(self, text):
         from pelican.rstdirectives import abbr_role

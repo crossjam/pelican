@@ -1,19 +1,18 @@
 import os
+from io import BytesIO
 from shutil import rmtree
 from tempfile import mkdtemp
-
-from six import BytesIO
 
 from pelican.server import ComplexHTTPRequestHandler
 from pelican.tests.support import unittest
 
 
-class MockRequest(object):
+class MockRequest:
     def makefile(self, *args, **kwargs):
         return BytesIO(b"")
 
 
-class MockServer(object):
+class MockServer:
     pass
 
 
@@ -26,21 +25,20 @@ class TestServer(unittest.TestCase):
         os.chdir(self.temp_output)
 
     def tearDown(self):
-        rmtree(self.temp_output)
         os.chdir(self.old_cwd)
+        rmtree(self.temp_output)
 
     def test_get_path_that_exists(self):
-
         handler = ComplexHTTPRequestHandler(MockRequest(), ('0.0.0.0', 8888),
                                             self.server)
         handler.base_path = self.temp_output
 
-        os.mknod(os.path.join(self.temp_output, 'foo.html'))
+        open(os.path.join(self.temp_output, 'foo.html'), 'a').close()
         os.mkdir(os.path.join(self.temp_output, 'foo'))
-        os.mknod(os.path.join(self.temp_output, 'foo', 'index.html'))
+        open(os.path.join(self.temp_output, 'foo', 'index.html'), 'a').close()
 
         os.mkdir(os.path.join(self.temp_output, 'bar'))
-        os.mknod(os.path.join(self.temp_output, 'bar', 'index.html'))
+        open(os.path.join(self.temp_output, 'bar', 'index.html'), 'a').close()
 
         os.mkdir(os.path.join(self.temp_output, 'baz'))
 

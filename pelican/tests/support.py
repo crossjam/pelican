@@ -1,6 +1,3 @@
-# -*- coding: utf-8 -*-
-from __future__ import print_function, unicode_literals
-
 import locale
 import logging
 import os
@@ -10,11 +7,10 @@ import sys
 import unittest
 from contextlib import contextmanager
 from functools import wraps
+from io import StringIO
 from logging.handlers import BufferingHandler
 from shutil import rmtree
 from tempfile import mkdtemp
-
-from six import StringIO
 
 from pelican.contents import Article
 from pelican.readers import default_metadata
@@ -136,7 +132,7 @@ def skipIfNoExecutable(executable):
             res = None
 
     if res is None:
-        return unittest.skip('{0} executable not found'.format(executable))
+        return unittest.skip('{} executable not found'.format(executable))
 
     return lambda func: func
 
@@ -164,6 +160,19 @@ def locale_available(locale_):
         return True
 
 
+def can_symlink():
+    res = True
+    try:
+        with temporary_folder() as f:
+            os.symlink(
+                f,
+                os.path.join(f, 'symlink')
+            )
+    except OSError:
+        res = False
+    return res
+
+
 def get_settings(**kwargs):
     """Provide tweaked setting dictionaries for testing
 
@@ -188,15 +197,24 @@ class LogCountHandler(BufferingHandler):
     """Capturing and counting logged messages."""
 
     def __init__(self, capacity=1000):
-        logging.handlers.BufferingHandler.__init__(self, capacity)
+        super().__init__(capacity)
 
     def count_logs(self, msg=None, level=None):
         return len([
-            l
-            for l
+            rec
+            for rec
             in self.buffer
-            if (msg is None or re.match(msg, l.getMessage())) and
-               (level is None or l.levelno == level)
+            if (msg is None or re.match(msg, rec.getMessage())) and
+               (level is None or rec.levelno == level)
+        ])
+
+    def count_formatted_logs(self, msg=None, level=None):
+        return len([
+            rec
+            for rec
+            in self.buffer
+            if (msg is None or re.search(msg, self.format(rec))) and
+               (level is None or rec.levelno == level)
         ])
 
 
@@ -204,13 +222,13 @@ class LoggedTestCase(unittest.TestCase):
     """A test case that captures log messages."""
 
     def setUp(self):
-        super(LoggedTestCase, self).setUp()
+        super().setUp()
         self._logcount_handler = LogCountHandler()
         logging.getLogger().addHandler(self._logcount_handler)
 
     def tearDown(self):
         logging.getLogger().removeHandler(self._logcount_handler)
-        super(LoggedTestCase, self).tearDown()
+        super().tearDown()
 
     def assertLogCountEqual(self, count=None, msg=None, **kwargs):
         actual = self._logcount_handler.count_logs(msg=msg, **kwargs)

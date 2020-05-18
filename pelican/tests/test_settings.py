@@ -1,6 +1,3 @@
-# -*- coding: utf-8 -*-
-from __future__ import print_function, unicode_literals
-
 import copy
 import locale
 import os
@@ -22,7 +19,7 @@ class TestSettingsConfiguration(unittest.TestCase):
     """
     def setUp(self):
         self.old_locale = locale.setlocale(locale.LC_ALL)
-        locale.setlocale(locale.LC_ALL, str('C'))
+        locale.setlocale(locale.LC_ALL, 'C')
         self.PATH = abspath(dirname(__file__))
         default_conf = join(self.PATH, 'default_conf.py')
         self.settings = read_settings(default_conf)
@@ -139,12 +136,14 @@ class TestSettingsConfiguration(unittest.TestCase):
             settings['ARTICLE_DIR']
             settings['PAGE_DIR']
 
+    # locale.getdefaultlocale() is broken on Windows
+    # See: https://bugs.python.org/issue37945
     @unittest.skipIf(platform == 'win32', "Doesn't work on Windows")
     def test_default_encoding(self):
         # Test that the default locale is set if not specified in settings
 
         # Reset locale to Python's default locale
-        locale.setlocale(locale.LC_ALL, str('C'))
+        locale.setlocale(locale.LC_ALL, 'C')
         self.assertEqual(self.settings['LOCALE'], DEFAULT_CONFIG['LOCALE'])
 
         configure_settings(self.settings)

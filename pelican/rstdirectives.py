@@ -1,6 +1,3 @@
-# -*- coding: utf-8 -*-
-from __future__ import print_function, unicode_literals
-
 import re
 
 from docutils import nodes, utils
@@ -9,8 +6,6 @@ from docutils.parsers.rst import Directive, directives, roles
 from pygments import highlight
 from pygments.formatters import HtmlFormatter
 from pygments.lexers import TextLexer, get_lexer_by_name
-
-import six
 
 import pelican.settings as pys
 
@@ -49,7 +44,7 @@ class Pygments(Directive):
 
         # Fetch the defaults
         if pys.PYGMENTS_RST_OPTIONS is not None:
-            for k, v in six.iteritems(pys.PYGMENTS_RST_OPTIONS):
+            for k, v in pys.PYGMENTS_RST_OPTIONS.items():
                 # Locally set options overrides the defaults
                 if k not in self.options:
                     self.options[k] = v

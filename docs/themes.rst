@@ -4,7 +4,7 @@ Creating themes
 ###############
 
 To generate its HTML output, Pelican uses the `Jinja
-<http://jinja.pocoo.org/>`_ templating engine due to its flexibility and
+<https://palletsprojects.com/p/jinja/>`_ templating engine due to its flexibility and
 straightforward syntax. If you want to create your own theme, feel free to take
 inspiration from the `"simple" theme
 <https://github.com/getpelican/pelican/tree/master/pelican/themes/simple/templates>`_.
@@ -75,7 +75,7 @@ output_file     The name of the file currently being generated. For
 articles        The list of articles, ordered descending by date.
                 All the elements are `Article` objects, so you can
                 access their attributes (e.g. title, summary, author
-                etc.). Sometimes this is shadowed (for instance in
+                etc.). Sometimes this is shadowed (for instance, in
                 the tags page). You will then find info about it
                 in the `all_articles` variable.
 dates           The same list of articles, but ordered by date,
@@ -104,7 +104,7 @@ that allow them to be easily sorted by name::
 If you want to sort based on different criteria, `Jinja's sort command`__ has a
 number of options.
 
-__ http://jinja.pocoo.org/docs/templates/#sort
+__ https://jinja.palletsprojects.com/en/master/templates/#sort
 
 
 Date Formatting
@@ -120,8 +120,8 @@ your date according to the locale given in your settings::
 
     {{ article.date|strftime('%d %B %Y') }}
 
-.. _datetime: https://docs.python.org/2/library/datetime.html#datetime-objects
-.. _strftime: https://docs.python.org/2/library/datetime.html#strftime-strptime-behavior
+.. _datetime: https://docs.python.org/3/library/datetime.html#datetime-objects
+.. _strftime: https://docs.python.org/3/library/datetime.html#strftime-strptime-behavior
 
 
 index.html
@@ -242,7 +242,7 @@ as the name of the metadata field, except in all-lowercase characters.
 For example, you could add a field called `FacebookImage` to your article
 metadata, as shown below:
 
-.. code-block:: markdown
+.. code-block:: md
 
     Title: I love Python more than music
     Date: 2013-11-06 10:06

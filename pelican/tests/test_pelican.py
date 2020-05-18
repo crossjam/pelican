@@ -1,16 +1,9 @@
-# -*- coding: utf-8 -*-
-from __future__ import print_function, unicode_literals
-
-try:
-    import collections.abc as collections
-except ImportError:
-    import collections
-
 import locale
 import logging
 import os
 import subprocess
 import sys
+from collections.abc import Sequence
 from shutil import rmtree
 from tempfile import mkdtemp
 
@@ -47,24 +40,25 @@ class TestPelican(LoggedTestCase):
     # to run pelican in different situations and see how it behaves
 
     def setUp(self):
-        super(TestPelican, self).setUp()
+        super().setUp()
         self.temp_path = mkdtemp(prefix='pelicantests.')
         self.temp_cache = mkdtemp(prefix='pelican_cache.')
         self.maxDiff = None
         self.old_locale = locale.setlocale(locale.LC_ALL)
-        locale.setlocale(locale.LC_ALL, str('C'))
+        locale.setlocale(locale.LC_ALL, 'C')
 
     def tearDown(self):
+        read_settings()  # cleanup PYGMENTS_RST_OPTIONS
         rmtree(self.temp_path)
         rmtree(self.temp_cache)
         locale.setlocale(locale.LC_ALL, self.old_locale)
-        super(TestPelican, self).tearDown()
+        super().tearDown()
 
     def assertDirsEqual(self, left_path, right_path):
         out, err = subprocess.Popen(
             ['git', 'diff', '--no-ext-diff', '--exit-code',
              '-w', left_path, right_path],
-            env={str('PAGER'): str('')},
+            env={'PAGER': ''},
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         ).communicate()
@@ -73,13 +67,14 @@ class TestPelican(LoggedTestCase):
             # Work around for running tests on Windows
             for msg in [
                     "LF will be replaced by CRLF",
+                    "CRLF will be replaced by LF",
                     "The file will have its original line endings"]:
                 if msg in line:
                     return True
             return False
         if err:
-            err = '\n'.join([l for l in err.decode('utf8').splitlines()
-                             if not ignorable_git_crlf_errors(l)])
+            err = '\n'.join([line for line in err.decode('utf8').splitlines()
+                             if not ignorable_git_crlf_errors(line)])
         assert not out, out
         assert not err, err
 
@@ -95,7 +90,7 @@ class TestPelican(LoggedTestCase):
             generator_classes[-1] is StaticGenerator,
             "StaticGenerator must be the last generator, but it isn't!")
         self.assertIsInstance(
-            generator_classes, collections.Sequence,
+            generator_classes, Sequence,
             "get_generator_classes() must return a Sequence to preserve order")
 
     def test_basic_generation_works(self):
@@ -122,7 +117,7 @@ class TestPelican(LoggedTestCase):
             'PATH': INPUT_PATH,
             'OUTPUT_PATH': self.temp_path,
             'CACHE_PATH': self.temp_cache,
-            'LOCALE': locale.normalize('en_US'),
+            'LOCALE': locale.normalize('en_US.UTF-8'),
         })
         pelican = Pelican(settings=settings)
         mute(True)(pelican.run)()
@@ -134,9 +129,9 @@ class TestPelican(LoggedTestCase):
     def test_custom_locale_generation_works(self):
         '''Test that generation with fr_FR.UTF-8 locale works'''
         if sys.platform == 'win32':
-            our_locale = str('French')
+            our_locale = 'French'
         else:
-            our_locale = str('fr_FR.UTF-8')
+            our_locale = 'fr_FR.UTF-8'
 
         settings = read_settings(path=SAMPLE_FR_CONFIG, override={
             'PATH': INPUT_PATH,
@@ -263,3 +258,10 @@ class TestPelican(LoggedTestCase):
             count=1,
             msg="Could not process .*parse_error.rst",
             level=logging.ERROR)
+
+    def test_module_load(self):
+        """Test loading via python -m pelican --help displays the help"""
+        output = subprocess.check_output([
+            sys.executable, '-m', 'pelican', '--help'
+        ]).decode('ascii', 'replace')
+        assert 'usage:' in output

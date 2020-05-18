@@ -1,13 +1,8 @@
-# -*- coding: utf-8 -*-
-from __future__ import print_function, unicode_literals
-
 import functools
 import logging
 import os
 from collections import namedtuple
 from math import ceil
-
-import six
 
 logger = logging.getLogger(__name__)
 PaginationRule = namedtuple(
@@ -16,7 +11,7 @@ PaginationRule = namedtuple(
 )
 
 
-class Paginator(object):
+class Paginator:
     def __init__(self, name, url, object_list, settings, per_page=None):
         self.name = name
         self.url = url
@@ -64,7 +59,7 @@ class Paginator(object):
     page_range = property(_get_page_range)
 
 
-class Page(object):
+class Page:
     def __init__(self, name, url, object_list, number, paginator, settings):
         self.full_name = name
         self.name, self.extension = os.path.splitext(name)
@@ -77,7 +72,7 @@ class Page(object):
         self.settings = settings
 
     def __repr__(self):
-        return '<Page %s of %s>' % (self.number, self.paginator.num_pages)
+        return '<Page {} of {}>'.format(self.number, self.paginator.num_pages)
 
     def has_next(self):
         return self.number < self.paginator.num_pages
@@ -131,7 +126,7 @@ class Page(object):
 
         prop_value = getattr(rule, key)
 
-        if not isinstance(prop_value, six.string_types):
+        if not isinstance(prop_value, str):
             logger.warning('%s is set to %s', key, prop_value)
             return prop_value
 
