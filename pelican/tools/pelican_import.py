@@ -18,13 +18,6 @@ from pelican.log import init
 from pelican.settings import read_settings
 from pelican.utils import SafeDatetime, slugify
 
-try:
-    from html import unescape  # py3.5+
-except ImportError:
-    from six.moves.html_parser import HTMLParser
-
-    unescape = HTMLParser().unescape
-
 logger = logging.getLogger(__name__)
 
 
